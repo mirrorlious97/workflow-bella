@@ -35,6 +35,8 @@ const extractKeyword = (title) => {
   return title.slice(0, 4) + '..';
 };
 
+
+
 const generateDisplayId = (track, allTasks) => {
   const now = new Date();
   const yy = String(now.getFullYear()).slice(-2);
@@ -52,23 +54,72 @@ const generateDisplayId = (track, allTasks) => {
 };
 
 // --- 初始数据 ---
-const INITIAL_COMPANIES = ['千问科技', '星禾传媒', '白鹭数据', '朝云咨询'];
-const INITIAL_TASKS = [
-  { id: 1, displayId: '2604-01', track: 'company', company: '千问科技', title: '提交联合合作方案', contact: '林晨', locations: ['A区办公楼'], deadline: addHours(5), priority: '高', status: 'todo', note: '需附带阶梯报价表' },
-  { id: 2, displayId: '2604-02', track: 'company', company: '星禾传媒', title: '确认拍摄排期', contact: '张导', locations: ['客户现场'], deadline: addHours(30), priority: '中', status: 'todo', note: '等对方回邮件后锁档期' },
-  { id: 5, displayId: '2604-03', track: 'company', company: '白鹭数据', title: '商谈合同事项', contact: '法务李总', locations: ['瑞士'], deadline: addHours(52), priority: '中', status: 'todo', note: '携带材料A' },
-  { id: 3, displayId: '2604-01', track: 'trip', company: null, purposes: ['上海分公司季度视察', '听取Q1总结汇报', '晚宴应酬'], meetWho: '张总', locations: ['上海总部', '静安项目点'], deadline: addHours(48), priority: '高', status: 'todo', note: '检查新项目进度，带齐财报资料', transportation: 'MU5101 (10:00 虹桥)', accommodation: '浦东香格里拉大酒店' },
-  { id: 4, displayId: '2604-02', track: 'trip', company: null, purposes: ['B区工地现场巡检', '约谈施工方负责人'], meetWho: '李总监', locations: ['B区工地现场'], deadline: addHours(-5), priority: '高', status: 'cancelled', note: '因恶劣天气取消' }
-];
-const INITIAL_EVENTS = [
-  { id: 201, date: '2026-04-15', name: '汉诺威工业博览会', location: '德国·汉诺威', type: 'exhibition' },
-  { id: 202, date: '2026-05-20', name: '太太结婚纪念日', location: '家中/餐厅', type: 'anniversary' },
-  { id: 203, date: '2026-06-12', name: '女儿 10 岁生日', location: '无', type: 'birthday' }
-];
-
+const INITIAL_COMPANIES = [];
+const INITIAL_TASKS = [];
+const INITIAL_EVENTS = [];
 export default function App() {
+ 
   const [isDarkMode, setIsDarkMode] = useState(true);
-  const [activeTrack, setActiveTrack] = useState('company'); 
+  const [activeTrack, setActiveTrack] = useState('company');
+  
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+const [authMode, setAuthMode] = useState('login'); // login | register
+const [authForm, setAuthForm] = useState({
+  username: '',
+  password: '',
+  confirmPassword: '',
+});
+
+const handleAuthInput = (e) => {
+  const { name, value } = e.target;
+  setAuthForm((prev) => ({ ...prev, [name]: value }));
+};
+
+const handleRegister = () => {
+  if (!authForm.username.trim() || !authForm.password.trim()) {
+    showMessage('请输入用户名和密码', 'error');
+    return;
+  }
+  if (authForm.password !== authForm.confirmPassword) {
+    showMessage('两次密码不一致', 'error');
+    return;
+  }
+  localStorage.setItem(
+    'workflow_user',
+    JSON.stringify({
+      username: authForm.username.trim(),
+      password: authForm.password,
+    })
+  );
+  showMessage('注册成功，请登录', 'success');
+  setAuthMode('login');
+  setAuthForm({ username: authForm.username, password: '', confirmPassword: '' });
+};
+
+const handleLogin = () => {
+  const saved = localStorage.getItem('workflow_user');
+  if (!saved) {
+    showMessage('还没有账号，请先注册', 'error');
+    return;
+  }
+  const user = JSON.parse(saved);
+  if (
+    authForm.username.trim() === user.username &&
+    authForm.password === user.password
+  ) {
+    setIsLoggedIn(true);
+    showMessage('登录成功', 'success');
+  } else {
+    showMessage('用户名或密码错误', 'error');
+  }
+};
+
+const handleLogout = () => {
+  setIsLoggedIn(false);
+  setAuthMode('login');
+  setAuthForm({ username: '', password: '', confirmPassword: '' });
+};
+  
   const [activeSubTrack, setActiveSubTrack] = useState('itinerary');
   
   const [tasks, setTasks] = useState(INITIAL_TASKS);
@@ -78,7 +129,7 @@ export default function App() {
   const [toast, setToast] = useState(null);
   
   const [formData, setFormData] = useState({
-    company: INITIAL_COMPANIES[0], displayId: '', title: '', purposes: [], 
+    company: '', displayId: '', title: '', purposes: [], 
     contact: '', meetWho: '', locations: [], deadline: '', priority: '中', note: '',
     transportation: '', accommodation: '', eventType: 'exhibition'
   });
@@ -296,6 +347,82 @@ export default function App() {
     'text-sm': { main: 'text-sm', large: 'text-base' },
     'text-base': { main: 'text-base', large: 'text-lg' }
   }[uiPrefs.fontSize];
+
+  if (!isLoggedIn) {
+  return (
+    <div className={isDarkMode ? 'dark' : ''}>
+      <div className="min-h-screen bg-zinc-50 dark:bg-black text-zinc-900 dark:text-zinc-300 relative">
+        <div className="absolute top-4 right-6 flex items-center gap-3 text-xs">
+          <button
+            onClick={() => setAuthMode('login')}
+            className="text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
+          >
+            登录
+          </button>
+          <button
+            onClick={() => setAuthMode('register')}
+            className="text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
+          >
+            注册
+          </button>
+        </div>
+
+        <div className="min-h-screen flex items-center justify-center px-4">
+          <div className="w-full max-w-sm bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-6">
+            <h1 className="text-xl font-bold mb-6">
+              {authMode === 'login' ? '登录' : '注册'}
+            </h1>
+
+            <div className="space-y-4">
+              <input
+                name="username"
+                value={authForm.username}
+                onChange={handleAuthInput}
+                placeholder="用户名"
+                className="w-full border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2 outline-none"
+              />
+              <input
+                type="password"
+                name="password"
+                value={authForm.password}
+                onChange={handleAuthInput}
+                placeholder="密码"
+                className="w-full border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2 outline-none"
+              />
+              {authMode === 'register' && (
+                <input
+                  type="password"
+                  name="confirmPassword"
+                  value={authForm.confirmPassword}
+                  onChange={handleAuthInput}
+                  placeholder="确认密码"
+                  className="w-full border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2 outline-none"
+                />
+              )}
+
+              {authMode === 'login' ? (
+                <button
+                  onClick={handleLogin}
+                  className="w-full bg-zinc-900 dark:bg-white dark:text-black text-white py-2 font-bold"
+                >
+                  登录
+                </button>
+              ) : (
+                <button
+                  onClick={handleRegister}
+                  className="w-full bg-zinc-900 dark:bg-white dark:text-black text-white py-2 font-bold"
+                >
+                  注册
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
   return (
     <div className={isDarkMode ? 'dark' : ''}>
