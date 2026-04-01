@@ -1,9 +1,16 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { 
   Building2, Calendar, CheckCircle2,   LayoutDashboard, Plus, AlertCircle, 
   Check, Zap, X, User, MapPin, 
   Plane, Ban, Save, RefreshCw, UserCheck,   Sun, Moon, Settings, Network, ArrowLeft, Bed, Search, Gift, Landmark
 } from 'lucide-react';
+import { auth } from './lib/firebase';
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
+  onAuthStateChanged
+} from 'firebase/auth';
 
 // --- 辅助函数 ---
 const toLocalISODate = (dateObj) => {
@@ -58,14 +65,14 @@ const INITIAL_COMPANIES = [];
 const INITIAL_TASKS = [];
 const INITIAL_EVENTS = [];
 export default function App() {
- 
-  const [isDarkMode, setIsDarkMode] = useState(true);
-  const [activeTrack, setActiveTrack] = useState('company');
-  
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-const [authMode, setAuthMode] = useState('login'); // login | register
+ const [isDarkMode, setIsDarkMode] = useState(true);
+const [activeTrack, setActiveTrack] = useState('company');
+
+ const [isLoggedIn, setIsLoggedIn] = useState(false);
+const [currentUser, setCurrentUser] = useState(null);
+const [authMode, setAuthMode] = useState('login');
 const [authForm, setAuthForm] = useState({
-  username: '',
+  email: '',
   password: '',
   confirmPassword: '',
 });
@@ -75,50 +82,71 @@ const handleAuthInput = (e) => {
   setAuthForm((prev) => ({ ...prev, [name]: value }));
 };
 
-const handleRegister = () => {
-  if (!authForm.username.trim() || !authForm.password.trim()) {
-    showMessage('请输入用户名和密码', 'error');
+const handleRegister = async () => {
+  if (!authForm.email.trim() || !authForm.password.trim()) {
+    showMessage('请输入邮箱和密码', 'error');
     return;
   }
+
   if (authForm.password !== authForm.confirmPassword) {
     showMessage('两次密码不一致', 'error');
     return;
   }
-  localStorage.setItem(
-    'workflow_user',
-    JSON.stringify({
-      username: authForm.username.trim(),
-      password: authForm.password,
-    })
-  );
-  showMessage('注册成功，请登录', 'success');
-  setAuthMode('login');
-  setAuthForm({ username: authForm.username, password: '', confirmPassword: '' });
+
+  try {
+    await createUserWithEmailAndPassword(
+      auth,
+      authForm.email.trim(),
+      authForm.password
+    );
+    showMessage('注册成功', 'success');
+    setAuthForm({ email: '', password: '', confirmPassword: '' });
+  }catch (error) {
+  console.log('register error:', error);
+  console.log('register error code:', error.code);
+  console.log('register error message:', error.message);
+  showMessage(error.code || '注册失败', 'error');
+}
 };
 
-const handleLogin = () => {
-  const saved = localStorage.getItem('workflow_user');
-  if (!saved) {
-    showMessage('还没有账号，请先注册', 'error');
+const handleLogin = async () => {
+  if (!authForm.email.trim() || !authForm.password.trim()) {
+    showMessage('请输入邮箱和密码', 'error');
     return;
   }
-  const user = JSON.parse(saved);
-  if (
-    authForm.username.trim() === user.username &&
-    authForm.password === user.password
-  ) {
-    setIsLoggedIn(true);
+
+  try {
+    await signInWithEmailAndPassword(
+      auth,
+      authForm.email.trim(),
+      authForm.password
+    );
     showMessage('登录成功', 'success');
-  } else {
-    showMessage('用户名或密码错误', 'error');
+  } catch (error) {
+    showMessage('邮箱或密码错误', 'error');
   }
 };
 
-const handleLogout = () => {
-  setIsLoggedIn(false);
-  setAuthMode('login');
-  setAuthForm({ username: '', password: '', confirmPassword: '' });
+const handleLogout = async () => {
+  try {
+    await signOut(auth);
+    setAuthMode('login');
+    setAuthForm({ email: '', password: '', confirmPassword: '' });
+    showMessage('已退出登录', 'success');
+  } catch (error) {
+    showMessage('退出失败', 'error');
+  }
 };
+
+
+useEffect(() => {
+  const unsubscribe = onAuthStateChanged(auth, (user) => {
+    setCurrentUser(user);
+    setIsLoggedIn(!!user);
+  });
+
+  return () => unsubscribe();
+}, []);
   
   const [activeSubTrack, setActiveSubTrack] = useState('itinerary');
   
@@ -375,10 +403,10 @@ const handleLogout = () => {
 
             <div className="space-y-4">
               <input
-                name="username"
-                value={authForm.username}
+                name="email"
+                value={authForm.email}
                 onChange={handleAuthInput}
-                placeholder="用户名"
+                placeholder="邮箱"
                 className="w-full border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2 outline-none"
               />
               <input
