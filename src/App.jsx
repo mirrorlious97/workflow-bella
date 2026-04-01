@@ -2,11 +2,9 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   collection,
   addDoc,
-  getDocs,
-  query,
-  orderBy
+  getDocs
 } from 'firebase/firestore';
-import { db } from './lib/firebase';
+
 import { 
   Building2, Calendar, CheckCircle2,   LayoutDashboard, Plus, AlertCircle, 
   Check, Zap, X, User, MapPin, 
@@ -151,21 +149,29 @@ const loadUserData = async (uid) => {
     const eventsRef = collection(db, 'users', uid, 'events');
     const companiesRef = collection(db, 'users', uid, 'companies');
 
-    const tasksSnap = await getDocs(query(tasksRef, orderBy('createdAt', 'desc')));
-    const eventsSnap = await getDocs(query(eventsRef, orderBy('createdAt', 'desc')));
-    const companiesSnap = await getDocs(companiesRef);
+    const [tasksSnap, eventsSnap, companiesSnap] = await Promise.all([
+      getDocs(tasksRef),
+      getDocs(eventsRef),
+      getDocs(companiesRef),
+    ]);
 
-    const loadedTasks = tasksSnap.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
+    const loadedTasks = tasksSnap.docs
+      .map((doc) => ({
+        ...doc.data(),
+        id: doc.id,
+      }))
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 
-    const loadedEvents = eventsSnap.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
+    const loadedEvents = eventsSnap.docs
+      .map((doc) => ({
+        ...doc.data(),
+        id: doc.id,
+      }))
+      .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
 
-    const loadedCompanies = companiesSnap.docs.map(doc => doc.data().name).filter(Boolean);
+    const loadedCompanies = Array.from(
+      new Set(companiesSnap.docs.map((doc) => doc.data().name).filter(Boolean))
+    );
 
     setTasks(loadedTasks);
     setEvents(loadedEvents);
@@ -187,6 +193,7 @@ useEffect(() => {
       setTasks([]);
       setEvents([]);
       setCompanies([]);
+      setSelectedCompany('all');
     }
   });
 
@@ -280,7 +287,7 @@ useEffect(() => {
   
   const handleReschedule = (taskToCopy) => {
     setFormData({
-      company: taskToCopy.company || INITIAL_COMPANIES[0], displayId: '', title: taskToCopy.title || '',
+      company: taskToCopy.company || '', displayId: '', title: taskToCopy.title || '',
       purposes: [...(taskToCopy.purposes||[])], contact: taskToCopy.contact || '', meetWho: taskToCopy.meetWho || '',
       locations: [...taskToCopy.locations], deadline: '', priority: taskToCopy.priority, note: taskToCopy.note,
       transportation: taskToCopy.transportation || '', accommodation: taskToCopy.accommodation || '', eventType: 'exhibition'
@@ -311,89 +318,126 @@ useEffect(() => {
   };
 
   const handleAddTask = async () => {
-    if (!currentUser) {
-  showMessage('请先登录', 'error');
-  return;
-}
-    if (activeTrack === 'trip' && activeSubTrack === 'events') {
-      if (!formData.title.trim() || !formData.deadline) return showMessage('请填写名称和日期', 'error');
-      const newEvent = {
-        id: Date.now(), date: formData.deadline.split('T')[0], name: formData.title.trim(),
-        location: locInput.trim() || '无', type: formData.eventType
-      };
-      try {
-  const docRef = await addDoc(
-    collection(db, 'users', currentUser.uid, 'events'),
-    {
-      ...newEvent,
-      createdAt: Date.now(),
-    }
-  );
+  if (!currentUser) {
+    showMessage('请先登录', 'error');
+    return;
+  }
 
-  setEvents(p => [...p, { ...newEvent, id: docRef.id }]);
-  showMessage('事件已存入参考库', 'success');
-} catch (error) {
-  console.error('add event error:', error);
-  showMessage('事件保存失败', 'error');
-}
-      setFormData(p => ({ ...p, title: '', deadline: '' })); setLocInput('');
+  if (activeTrack === 'trip' && activeSubTrack === 'events') {
+    if (!formData.title.trim() || !formData.deadline) {
+      showMessage('请填写名称和日期', 'error');
       return;
     }
 
-    let fl = [...formData.locations]; if (locInput.trim() && !fl.includes(locInput.trim())) fl.push(locInput.trim());
-    let fp = [...formData.purposes]; if (purposeInput.trim() && !fp.includes(purposeInput.trim())) fp.push(purposeInput.trim());
-    if (activeTrack === 'company' && !formData.title.trim()) return showMessage('请填写标题', 'error');
-    if (activeTrack === 'trip' && fp.length === 0) return showMessage('需至少填写一件事由', 'error');
-    if (!formData.deadline) return showMessage('请填写时间', 'error');
+    const newEvent = {
+      date: formData.deadline.split('T')[0],
+      name: formData.title.trim(),
+      location: locInput.trim() || '无',
+      type: formData.eventType,
+      createdAt: Date.now(),
+    };
 
-    if (
-  activeTrack === 'company' &&
-  formData.company.trim() &&
-  !companies.includes(formData.company.trim())
-) {
-  try {
-    await addDoc(
-      collection(db, 'users', currentUser.uid, 'companies'),
-      {
+    try {
+      const docRef = await addDoc(
+        collection(db, 'users', currentUser.uid, 'events'),
+        newEvent
+      );
+
+      setEvents((prev) => [...prev, { ...newEvent, id: docRef.id }]);
+      showMessage('事件已存入参考库', 'success');
+      setFormData((p) => ({ ...p, title: '', deadline: '' }));
+      setLocInput('');
+    } catch (error) {
+      console.error('add event error:', error);
+      showMessage('事件保存失败', 'error');
+    }
+    return;
+  }
+
+  const fl = [...formData.locations];
+  if (locInput.trim() && !fl.includes(locInput.trim())) fl.push(locInput.trim());
+
+  const fp = [...formData.purposes];
+  if (purposeInput.trim() && !fp.includes(purposeInput.trim())) fp.push(purposeInput.trim());
+
+  if (activeTrack === 'company' && !formData.title.trim()) {
+    showMessage('请填写标题', 'error');
+    return;
+  }
+  if (activeTrack === 'trip' && fp.length === 0) {
+    showMessage('需至少填写一件事由', 'error');
+    return;
+  }
+  if (!formData.deadline) {
+    showMessage('请填写时间', 'error');
+    return;
+  }
+
+  if (
+    activeTrack === 'company' &&
+    formData.company.trim() &&
+    !companies.includes(formData.company.trim())
+  ) {
+    try {
+      await addDoc(collection(db, 'users', currentUser.uid, 'companies'), {
         name: formData.company.trim(),
         createdAt: Date.now(),
-      }
-    );
-    setCompanies(prev => [...prev, formData.company.trim()]);
-  } catch (error) {
-    console.error('add company error:', error);
-  }
-}
-
-    const finalDisplayId = formData.displayId.trim() || generateDisplayId(activeTrack, tasks);
-    
-    const newTask = {
-      id: Date.now(), displayId: finalDisplayId,
-      track: activeTrack, company: activeTrack === 'company' ? formData.company : null, 
-      title: activeTrack === 'company' ? formData.title.trim() : '', purposes: activeTrack === 'trip' ? fp : [],
-      contact: activeTrack === 'company' ? formData.contact.trim() : '', meetWho: activeTrack === 'trip' ? formData.meetWho.trim() : '',
-      locations: fl, deadline: formData.deadline, priority: formData.priority, status: 'todo', note: formData.note.trim(),
-      transportation: activeTrack === 'trip' ? formData.transportation.trim() : '',
-      accommodation: activeTrack === 'trip' ? formData.accommodation.trim() : ''
-    };
-    try {
-  const docRef = await addDoc(
-    collection(db, 'users', currentUser.uid, 'tasks'),
-    {
-      ...newTask,
-      createdAt: Date.now(),
+      });
+      setCompanies((prev) => [...prev, formData.company.trim()]);
+    } catch (error) {
+      console.error('add company error:', error);
     }
-  );
+  }
 
-  setTasks(p => [{ ...newTask, id: docRef.id }, ...p]);
-  showMessage('已落库', 'success');
-} catch (error) {
-  console.error('add task error:', error);
-  showMessage('保存失败', 'error');
-}
-    setFormData(p => ({ ...p, displayId: '', title: '', contact: '', meetWho: '', note: '', locations: [], purposes: [], deadline: '', transportation: '', accommodation: '' }));
-    setLocInput(''); setPurposeInput('');
+  const finalDisplayId = formData.displayId.trim() || generateDisplayId(activeTrack, tasks);
+
+  const newTask = {
+    displayId: finalDisplayId,
+    track: activeTrack,
+    company: activeTrack === 'company' ? formData.company.trim() : null,
+    title: activeTrack === 'company' ? formData.title.trim() : '',
+    purposes: activeTrack === 'trip' ? fp : [],
+    contact: activeTrack === 'company' ? formData.contact.trim() : '',
+    meetWho: activeTrack === 'trip' ? formData.meetWho.trim() : '',
+    locations: fl,
+    deadline: formData.deadline,
+    priority: formData.priority,
+    status: 'todo',
+    note: formData.note.trim(),
+    transportation: activeTrack === 'trip' ? formData.transportation.trim() : '',
+    accommodation: activeTrack === 'trip' ? formData.accommodation.trim() : '',
+    createdAt: Date.now(),
   };
+
+  try {
+    const docRef = await addDoc(
+      collection(db, 'users', currentUser.uid, 'tasks'),
+      newTask
+    );
+
+    setTasks((prev) => [{ ...newTask, id: docRef.id }, ...prev]);
+    showMessage('已落库', 'success');
+
+    setFormData((p) => ({
+      ...p,
+      displayId: '',
+      title: '',
+      contact: '',
+      meetWho: '',
+      note: '',
+      locations: [],
+      purposes: [],
+      deadline: '',
+      transportation: '',
+      accommodation: '',
+    }));
+    setLocInput('');
+    setPurposeInput('');
+  } catch (error) {
+    console.error('add task error:', error);
+    showMessage('保存失败', 'error');
+  }
+};
 
   const scrollToTask = (id) => {
     const el = document.getElementById(`task-${id}`);
@@ -470,7 +514,9 @@ useEffect(() => {
 
   if (!isLoggedIn) {
   return (
+
     <div className={isDarkMode ? 'dark' : ''}>
+      
       <div className="min-h-screen bg-zinc-50 dark:bg-black text-zinc-900 dark:text-zinc-300 relative">
         <div className="absolute top-4 right-6 flex items-center gap-3 text-xs">
           <button
@@ -547,6 +593,19 @@ useEffect(() => {
   return (
     <div className={isDarkMode ? 'dark' : ''}>
       <div className={`min-h-screen bg-zinc-50 dark:bg-black text-zinc-900 dark:text-zinc-300 font-sans flex flex-col md:flex-row relative transition-colors duration-300 ${currentFont.main}`}>
+        <div className="absolute top-4 right-6 flex items-center gap-3 text-xs z-20">
+          {currentUser && (
+            <span className="text-zinc-500 dark:text-zinc-400">
+              已登录：{currentUser.email}
+            </span>
+          )}
+          <button
+            onClick={handleLogout}
+            className="text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
+          >
+            退出
+          </button>
+        </div>
         
         {/* 全局提示 */}
         {toast && (
