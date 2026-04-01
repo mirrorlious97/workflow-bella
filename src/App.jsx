@@ -1,10 +1,18 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
+import {
+  collection,
+  addDoc,
+  getDocs,
+  query,
+  orderBy
+} from 'firebase/firestore';
+import { db } from './lib/firebase';
 import { 
   Building2, Calendar, CheckCircle2,   LayoutDashboard, Plus, AlertCircle, 
   Check, Zap, X, User, MapPin, 
   Plane, Ban, Save, RefreshCw, UserCheck,   Sun, Moon, Settings, Network, ArrowLeft, Bed, Search, Gift, Landmark
 } from 'lucide-react';
-import { auth } from './lib/firebase';
+import { auth, db } from './lib/firebase';
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -137,12 +145,49 @@ const handleLogout = async () => {
     showMessage('退出失败', 'error');
   }
 };
+const loadUserData = async (uid) => {
+  try {
+    const tasksRef = collection(db, 'users', uid, 'tasks');
+    const eventsRef = collection(db, 'users', uid, 'events');
+    const companiesRef = collection(db, 'users', uid, 'companies');
 
+    const tasksSnap = await getDocs(query(tasksRef, orderBy('createdAt', 'desc')));
+    const eventsSnap = await getDocs(query(eventsRef, orderBy('createdAt', 'desc')));
+    const companiesSnap = await getDocs(companiesRef);
+
+    const loadedTasks = tasksSnap.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+
+    const loadedEvents = eventsSnap.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+
+    const loadedCompanies = companiesSnap.docs.map(doc => doc.data().name).filter(Boolean);
+
+    setTasks(loadedTasks);
+    setEvents(loadedEvents);
+    setCompanies(loadedCompanies);
+  } catch (error) {
+    console.error('loadUserData error:', error);
+    showMessage('加载云端数据失败', 'error');
+  }
+};
 
 useEffect(() => {
-  const unsubscribe = onAuthStateChanged(auth, (user) => {
+  const unsubscribe = onAuthStateChanged(auth, async (user) => {
     setCurrentUser(user);
     setIsLoggedIn(!!user);
+
+    if (user) {
+      await loadUserData(user.uid);
+    } else {
+      setTasks([]);
+      setEvents([]);
+      setCompanies([]);
+    }
   });
 
   return () => unsubscribe();
@@ -265,14 +310,32 @@ useEffect(() => {
     setEditingId(null);
   };
 
-  const handleAddTask = () => {
+  const handleAddTask = async () => {
+    if (!currentUser) {
+  showMessage('请先登录', 'error');
+  return;
+}
     if (activeTrack === 'trip' && activeSubTrack === 'events') {
       if (!formData.title.trim() || !formData.deadline) return showMessage('请填写名称和日期', 'error');
       const newEvent = {
         id: Date.now(), date: formData.deadline.split('T')[0], name: formData.title.trim(),
         location: locInput.trim() || '无', type: formData.eventType
       };
-      setEvents(p => [...p, newEvent]); showMessage('事件已存入参考库', 'success');
+      try {
+  const docRef = await addDoc(
+    collection(db, 'users', currentUser.uid, 'events'),
+    {
+      ...newEvent,
+      createdAt: Date.now(),
+    }
+  );
+
+  setEvents(p => [...p, { ...newEvent, id: docRef.id }]);
+  showMessage('事件已存入参考库', 'success');
+} catch (error) {
+  console.error('add event error:', error);
+  showMessage('事件保存失败', 'error');
+}
       setFormData(p => ({ ...p, title: '', deadline: '' })); setLocInput('');
       return;
     }
@@ -283,9 +346,24 @@ useEffect(() => {
     if (activeTrack === 'trip' && fp.length === 0) return showMessage('需至少填写一件事由', 'error');
     if (!formData.deadline) return showMessage('请填写时间', 'error');
 
-    if (activeTrack === 'company' && formData.company.trim() && !companies.includes(formData.company.trim())) {
-      setCompanies(prev => [...prev, formData.company.trim()]);
-    }
+    if (
+  activeTrack === 'company' &&
+  formData.company.trim() &&
+  !companies.includes(formData.company.trim())
+) {
+  try {
+    await addDoc(
+      collection(db, 'users', currentUser.uid, 'companies'),
+      {
+        name: formData.company.trim(),
+        createdAt: Date.now(),
+      }
+    );
+    setCompanies(prev => [...prev, formData.company.trim()]);
+  } catch (error) {
+    console.error('add company error:', error);
+  }
+}
 
     const finalDisplayId = formData.displayId.trim() || generateDisplayId(activeTrack, tasks);
     
@@ -298,7 +376,21 @@ useEffect(() => {
       transportation: activeTrack === 'trip' ? formData.transportation.trim() : '',
       accommodation: activeTrack === 'trip' ? formData.accommodation.trim() : ''
     };
-    setTasks(p => [newTask, ...p]); showMessage('已落库', 'success');
+    try {
+  const docRef = await addDoc(
+    collection(db, 'users', currentUser.uid, 'tasks'),
+    {
+      ...newTask,
+      createdAt: Date.now(),
+    }
+  );
+
+  setTasks(p => [{ ...newTask, id: docRef.id }, ...p]);
+  showMessage('已落库', 'success');
+} catch (error) {
+  console.error('add task error:', error);
+  showMessage('保存失败', 'error');
+}
     setFormData(p => ({ ...p, displayId: '', title: '', contact: '', meetWho: '', note: '', locations: [], purposes: [], deadline: '', transportation: '', accommodation: '' }));
     setLocInput(''); setPurposeInput('');
   };
